@@ -3,84 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>E-Ink Multi-Library Reader (Arreglado)</title>
+    <title>E-Ink Pocket Reader</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <style>
         :root {
-            --bg: #f4f4f4; --text: #1a1a1a; --accent: #4a4a4a; --border: #d1d1d1;
-            --active-bg: #1a1a1a; --active-text: #f4f4f4;
+            --bg: #fdfdfd; --text: #1a1a1a; --border: #e0e0e0;
+            --sidebar-bg: #f2f2f2; --active-line: #1a1a1a;
         }
         body.dark-mode {
-            --bg: #121212; --text: #b0b0b0; --accent: #888888; --border: #333333;
-            --active-bg: #e0e0e0; --active-text: #121212;
+            --bg: #121212; --text: #b0b0b0; --border: #2a2a2a;
+            --sidebar-bg: #1a1a1a; --active-line: #eeeeee;
         }
 
-        body {
-            font-family: 'Georgia', serif; background-color: var(--bg); color: var(--text);
-            display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0;
-            transition: all 0.3s;
+        body, html {
+            height: 100%; margin: 0; padding: 0;
+            font-family: 'Georgia', serif;
+            background-color: var(--bg); color: var(--text);
+            transition: background 0.3s; overflow: hidden;
         }
 
-        .container {
-            max-width: 900px; width: 95%; border: 2px solid var(--text);
-            padding: 25px; background: var(--bg); box-shadow: 8px 8px 0px var(--border);
-            position: relative; display: grid; grid-template-columns: 200px 1fr; gap: 20px;
+        /* DISEÑO FLEXIBLE (RESPONSIVO) */
+        .app-container {
+            display: flex;
+            height: 100vh;
+            width: 100vw;
         }
 
-        .library-panel { border-right: 1px solid var(--border); padding-right: 15px; }
-        .library-title { font-variant: small-caps; font-weight: bold; border-bottom: 1px solid var(--text); margin-bottom: 10px; }
+        /* BIBLIOTECA LATERAL COLAPSABLE */
+        .sidebar {
+            width: 280px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+            z-index: 100;
+        }
+
+        /* Ajuste para móviles */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: absolute;
+                left: 0; top: 0; bottom: 0;
+                transform: translateX(-100%);
+            }
+            .sidebar.open { transform: translateX(0); }
+            .reading-area { padding: 20px !important; }
+        }
+
+        .sidebar-content { padding: 20px; flex-grow: 1; overflow-y: auto; }
+        
         .book-item {
-            padding: 8px; border: 1px solid var(--border); margin-bottom: 5px;
-            font-size: 0.8rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            padding: 12px; border-bottom: 1px solid var(--border);
+            font-size: 0.9rem; cursor: pointer; transition: 0.2s;
         }
-        .book-item.active { background: var(--text); color: var(--bg); }
+        .book-item.active { font-weight: bold; border-left: 4px solid var(--text); padding-left: 15px; }
 
-        #theme-toggle { position: absolute; top: 10px; right: 10px; background: none; border: 1px solid var(--text); color: var(--text); cursor: pointer; padding: 3px 8px; font-size: 10px; }
+        /* ÁREA DE LECTURA LIMPIA */
+        .reading-area {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 40px 10%;
+            max-width: 900px;
+            margin: 0 auto;
+            position: relative;
+        }
 
-        h1 { grid-column: 1 / span 2; text-align: center; font-variant: small-caps; margin: 0 0 15px 0; border-bottom: 2px solid var(--text); }
+        /* BOTÓN MENÚ MÓVIL */
+        .menu-btn {
+            position: fixed; top: 15px; left: 15px;
+            z-index: 110; background: var(--text); color: var(--bg);
+            border: none; padding: 8px 12px; cursor: pointer; font-size: 14px;
+        }
 
         #playlist {
-            height: 450px; overflow-y: auto; background: var(--bg); border: 1px solid var(--text);
-            padding: 20px; line-height: 1.8; text-align: justify;
+            flex-grow: 1; overflow-y: auto;
+            line-height: 1.8; text-align: justify;
+            padding-bottom: 100px; /* Espacio para controles */
         }
 
-        .sentence { padding: 2px 4px; cursor: pointer; display: inline; color: var(--accent); }
-        .sentence.active { background: var(--active-bg); color: var(--active-text); font-weight: bold; }
+        /* ESTILO SENTENCIA ACTIVA */
+        .sentence { cursor: pointer; color: var(--text); opacity: 0.6; transition: 0.2s; }
+        .sentence.active {
+            opacity: 1;
+            font-weight: bold;
+            background-color: rgba(0,0,0,0.03);
+            border-bottom: 2px solid var(--active-line);
+        }
 
-        .controls { display: flex; justify-content: space-between; margin-top: 15px; }
-        .main-btn { background: var(--text); color: var(--bg); border: none; padding: 8px 20px; cursor: pointer; font-weight: bold; }
-        input[type="file"] { font-size: 0.7rem; width: 100%; margin-top: 10px; }
+        /* BARRA DE CONTROL INFERIOR TIPO KINDLE */
+        .player-bar {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: var(--bg); border-top: 1px solid var(--border);
+            padding: 15px; display: flex; justify-content: space-around;
+            align-items: center; box-shadow: 0 -5px 15px rgba(0,0,0,0.05);
+        }
+
+        .btn-icon {
+            background: none; border: 1px solid var(--text);
+            padding: 8px 20px; font-family: inherit; cursor: pointer;
+            color: var(--text); font-variant: small-caps;
+        }
+
+        .upload-area { margin-top: 20px; border: 1px dashed var(--text); padding: 10px; text-align: center; font-size: 0.8rem; }
+        
+        select, input[type="range"] { width: 100%; margin: 10px 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <button id="theme-toggle">Modo Oscuro</button>
-    <h1>Biblioteca Digital</h1>
+<button class="menu-btn" onclick="toggleMenu()">☰ Libros</button>
 
-    <div class="library-panel">
-        <div class="library-title">Mis Libros</div>
-        <div id="book-list"></div>
-        <input type="file" id="pdf-upload" accept="application/pdf" multiple>
+<div class="app-container">
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-content">
+            <h3 style="font-variant: small-caps; border-bottom: 1px solid var(--text);">Biblioteca</h3>
+            <div id="book-list"></div>
+            
+            <div class="upload-area">
+                <input type="file" id="pdf-upload" accept="application/pdf" multiple style="display: none;">
+                <label for="pdf-upload" style="cursor: pointer;">+ Cargar PDFs</label>
+            </div>
+
+            <div style="margin-top: 40px;">
+                <label style="font-size: 0.7rem;">Narrador</label>
+                <select id="voice-select"></select>
+                
+                <label style="font-size: 0.7rem;">Tamaño de letra</label>
+                <input type="range" id="font-slider" min="16" max="32" value="20">
+                
+                <button onclick="toggleTheme()" style="width: 100%; margin-top: 10px; background: none; border: 1px solid var(--text); color: var(--text); cursor:pointer; padding: 5px;">
+                    Cambiar Modo (Día/Noche)
+                </button>
+            </div>
+        </div>
     </div>
 
-    <div class="main-content">
-        <div id="chapters" style="display: flex; gap: 8px; overflow-x: auto; margin-bottom: 10px;"></div>
-
-        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-            <select id="voice-select" style="flex-grow: 1; font-family: 'Georgia';"></select>
-            <input type="range" id="font-slider" min="12" max="30" value="18">
+    <div class="reading-area">
+        <div id="playlist" style="font-size: 20px;">
+            <div style="text-align: center; margin-top: 30%; opacity: 0.5;">— Toque "Libros" para comenzar —</div>
         </div>
 
-        <div id="playlist" style="font-size: 18px;">
-            <div style="text-align: center; margin-top: 150px; opacity: 0.5;">— Seleccione un libro —</div>
+        <div class="player-bar">
+            <button class="btn-icon" onclick="resetBook()">Reiniciar</button>
+            <button id="btn-play" class="btn-icon" style="background: var(--text); color: var(--bg); font-weight: bold;">Leer</button>
         </div>
-
-        <div class="controls">
-            <button id="btn-play" class="main-btn">Leer</button>
-            <button id="btn-stop" style="background:none; border:none; text-decoration: underline; color: var(--text); cursor:pointer;">Reiniciar</button>
-        </div>
-        <div id="status" style="font-size: 0.7rem; margin-top: 5px; font-style: italic;">Listo.</div>
     </div>
 </div>
 
@@ -92,18 +160,20 @@
     let library = [];
     let currentBookIndex = -1;
     let isPlaying = false;
-    let currentUtterance = null; // Para control preciso
 
-    // Cargar voces
-    function populateVoices() {
+    // Toggle para móviles
+    function toggleMenu() { document.getElementById('sidebar').classList.toggle('open'); }
+    function toggleTheme() { document.body.classList.toggle('dark-mode'); }
+
+    // Voces
+    function loadVoices() {
         document.getElementById('voice-select').innerHTML = synth.getVoices()
             .map((v, i) => `<option value="${i}" ${v.lang.includes('es') ? 'selected' : ''}>${v.name}</option>`)
             .join('');
     }
-    synth.onvoiceschanged = populateVoices;
-    populateVoices();
+    synth.onvoiceschanged = loadVoices; loadVoices();
 
-    // Cargar PDFs
+    // Procesar PDFs
     document.getElementById('pdf-upload').addEventListener('change', async (e) => {
         const files = Array.from(e.target.files);
         for (const file of files) {
@@ -114,25 +184,27 @@
                 const content = await page.getTextContent();
                 text += content.items.map(s => s.str).join(" ") + " ";
             }
-            // Limpieza profunda para evitar duplicados en el split
-            const bookFragments = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]+/g) || [text];
-            library.push({ name: file.name, fragments: bookFragments.map(f => f.trim()), lastIndex: 0 });
+            const cleanText = text.replace(/\s+/g, ' ');
+            const fragments = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+            library.push({ name: file.name, fragments: fragments.map(f => f.trim()), lastIndex: 0 });
         }
-        updateLibraryUI();
+        updateUI();
     });
 
-    function updateLibraryUI() {
-        document.getElementById('book-list').innerHTML = library.map((book, i) => `
-            <div class="book-item ${i === currentBookIndex ? 'active' : ''}" onclick="loadBook(${i})">📖 ${book.name}</div>
+    function updateUI() {
+        document.getElementById('book-list').innerHTML = library.map((b, i) => `
+            <div class="book-item ${i === currentBookIndex ? 'active' : ''}" onclick="openBook(${i})">
+                ${b.name.substring(0, 25)}...
+            </div>
         `).join('');
     }
 
-    function loadBook(index) {
+    function openBook(index) {
         stopAudio();
         currentBookIndex = index;
         const book = library[index];
-        const playlistDiv = document.getElementById('playlist');
-        playlistDiv.innerHTML = '';
+        const playlist = document.getElementById('playlist');
+        playlist.innerHTML = '';
         
         book.fragments.forEach((frag, i) => {
             const span = document.createElement('span');
@@ -140,29 +212,32 @@
             span.id = `s-${i}`;
             span.innerText = frag + " ";
             span.onclick = () => jumpTo(i);
-            playlistDiv.appendChild(span);
+            playlist.appendChild(span);
         });
-        updateLibraryUI();
+        
+        updateUI();
+        if (window.innerWidth < 768) toggleMenu(); // Cerrar menu en móvil tras elegir
+        
+        // Scroll al punto guardado
+        setTimeout(() => {
+            const el = document.getElementById(`s-${book.lastIndex}`);
+            if(el) el.scrollIntoView({ block: 'center' });
+        }, 100);
     }
 
-    // LÓGICA DE AUDIO MEJORADA
+    // AUDIO
     function speak(index) {
-        if (currentBookIndex === -1 || index >= library[currentBookIndex].fragments.length || !isPlaying) {
-            isPlaying = false;
-            return;
-        }
+        if (currentBookIndex === -1 || index >= library[currentBookIndex].fragments.length || !isPlaying) return;
 
         const book = library[currentBookIndex];
         book.lastIndex = index;
         
-        // Cancelar cualquier audio previo antes de una nueva frase
         synth.cancel();
+        const utter = new SpeechSynthesisUtterance(book.fragments[index]);
+        utter.voice = synth.getVoices()[document.getElementById('voice-select').value];
+        utter.rate = 0.95;
 
-        currentUtterance = new SpeechSynthesisUtterance(book.fragments[index]);
-        currentUtterance.voice = synth.getVoices()[document.getElementById('voice-select').value];
-        currentUtterance.rate = 0.9;
-
-        // Resaltado
+        // Resaltar
         document.querySelectorAll('.sentence').forEach(s => s.classList.remove('active'));
         const el = document.getElementById(`s-${index}`);
         if(el) {
@@ -170,62 +245,27 @@
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
-        currentUtterance.onend = () => {
-            if(isPlaying) {
-                // Pequeño timeout para evitar recursión inmediata que causa bloqueos
-                setTimeout(() => speak(index + 1), 50);
-            }
-        };
-
-        synth.speak(currentUtterance);
+        utter.onend = () => { if(isPlaying) setTimeout(() => speak(index + 1), 60); };
+        synth.speak(utter);
     }
 
-    function jumpTo(index) {
-        isPlaying = true;
-        speak(index);
-    }
-
-    function stopAudio() {
-        isPlaying = false;
-        synth.cancel();
-    }
+    function jumpTo(index) { isPlaying = true; document.getElementById('btn-play').innerText = "Pausar"; speak(index); }
+    function stopAudio() { isPlaying = false; synth.cancel(); document.getElementById('btn-play').innerText = "Leer"; }
+    function resetBook() { if(currentBookIndex !== -1) { stopAudio(); library[currentBookIndex].lastIndex = 0; openBook(currentBookIndex); } }
 
     document.getElementById('btn-play').addEventListener('click', () => {
         if (currentBookIndex === -1) return;
-        if (isPlaying) {
-            stopAudio();
-            document.getElementById('btn-play').innerText = "Reanudar";
-        } else {
-            isPlaying = true;
-            speak(library[currentBookIndex].lastIndex);
-            document.getElementById('btn-play').innerText = "Pausar";
-        }
-    });
-
-    document.getElementById('btn-stop').addEventListener('click', () => {
-        stopAudio();
-        if(currentBookIndex !== -1) {
-            library[currentBookIndex].lastIndex = 0;
-            loadBook(currentBookIndex);
-        }
-    });
-
-    // Cambios de estilo
-    document.getElementById('theme-toggle').addEventListener('click', () => {
-        document.body.classList.toggle('dark-mode');
+        if (isPlaying) { stopAudio(); } 
+        else { isPlaying = true; speak(library[currentBookIndex].lastIndex); document.getElementById('btn-play').innerText = "Pausar"; }
     });
 
     document.getElementById('font-slider').addEventListener('input', (e) => {
         document.getElementById('playlist').style.fontSize = e.target.value + 'px';
     });
 
-    // MANTENIMIENTO: Solo si está realmente trabado, pero con cuidado
-    setInterval(() => {
-        if (isPlaying && !synth.speaking) {
-            // Si debería estar sonando pero no hay actividad, forzamos siguiente
-            speak(library[currentBookIndex].lastIndex);
-        }
-    }, 10000);
+    // Mantenimiento de conexión para textos largos
+    setInterval(() => { if (isPlaying && !synth.speaking) speak(library[currentBookIndex].lastIndex); }, 10000);
 </script>
+
 </body>
 </html>
