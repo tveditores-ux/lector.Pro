@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>E-Ink Multi-Library Reader (Arreglado)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        :root {
+            --bg: #f4f4f4; --text: #1a1a1a; --accent: #4a4a4a; --border: #d1d1d1;
+            --active-bg: #1a1a1a; --active-text: #f4f4f4;
+        }
+        body.dark-mode {
+            --bg: #121212; --text: #b0b0b0; --accent: #888888; --border: #333333;
+            --active-bg: #e0e0e0; --active-text: #121212;
+        }
+
+        body {
+            font-family: 'Georgia', serif; background-color: var(--bg); color: var(--text);
+            display: flex; flex-direction: column; align-items: center; padding: 20px; margin: 0;
+            transition: all 0.3s;
+        }
+
+        .container {
+            max-width: 900px; width: 95%; border: 2px solid var(--text);
+            padding: 25px; background: var(--bg); box-shadow: 8px 8px 0px var(--border);
+            position: relative; display: grid; grid-template-columns: 200px 1fr; gap: 20px;
+        }
+
+        .library-panel { border-right: 1px solid var(--border); padding-right: 15px; }
+        .library-title { font-variant: small-caps; font-weight: bold; border-bottom: 1px solid var(--text); margin-bottom: 10px; }
+        .book-item {
+            padding: 8px; border: 1px solid var(--border); margin-bottom: 5px;
+            font-size: 0.8rem; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .book-item.active { background: var(--text); color: var(--bg); }
+
+        #theme-toggle { position: absolute; top: 10px; right: 10px; background: none; border: 1px solid var(--text); color: var(--text); cursor: pointer; padding: 3px 8px; font-size: 10px; }
+
+        h1 { grid-column: 1 / span 2; text-align: center; font-variant: small-caps; margin: 0 0 15px 0; border-bottom: 2px solid var(--text); }
+
+        #playlist {
+            height: 450px; overflow-y: auto; background: var(--bg); border: 1px solid var(--text);
+            padding: 20px; line-height: 1.8; text-align: justify;
+        }
+
+        .sentence { padding: 2px 4px; cursor: pointer; display: inline; color: var(--accent); }
+        .sentence.active { background: var(--active-bg); color: var(--active-text); font-weight: bold; }
+
+        .controls { display: flex; justify-content: space-between; margin-top: 15px; }
+        .main-btn { background: var(--text); color: var(--bg); border: none; padding: 8px 20px; cursor: pointer; font-weight: bold; }
+        input[type="file"] { font-size: 0.7rem; width: 100%; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <button id="theme-toggle">Modo Oscuro</button>
+    <h1>Biblioteca Digital</h1>
+
+    <div class="library-panel">
+        <div class="library-title">Mis Libros</div>
+        <div id="book-list"></div>
+        <input type="file" id="pdf-upload" accept="application/pdf" multiple>
+    </div>
+
+    <div class="main-content">
+        <div id="chapters" style="display: flex; gap: 8px; overflow-x: auto; margin-bottom: 10px;"></div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+            <select id="voice-select" style="flex-grow: 1; font-family: 'Georgia';"></select>
+            <input type="range" id="font-slider" min="12" max="30" value="18">
+        </div>
+
+        <div id="playlist" style="font-size: 18px;">
+            <div style="text-align: center; margin-top: 150px; opacity: 0.5;">— Seleccione un libro —</div>
+        </div>
+
+        <div class="controls">
+            <button id="btn-play" class="main-btn">Leer</button>
+            <button id="btn-stop" style="background:none; border:none; text-decoration: underline; color: var(--text); cursor:pointer;">Reiniciar</button>
+        </div>
+        <div id="status" style="font-size: 0.7rem; margin-top: 5px; font-style: italic;">Listo.</div>
+    </div>
+</div>
+
+<script>
+    const pdfjsLib = window['pdfjs-dist/build/pdf'];
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+    const synth = window.speechSynthesis;
+    let library = [];
+    let currentBookIndex = -1;
+    let isPlaying = false;
+    let currentUtterance = null; // Para control preciso
+
+    // Cargar voces
+    function populateVoices() {
+        document.getElementById('voice-select').innerHTML = synth.getVoices()
+            .map((v, i) => `<option value="${i}" ${v.lang.includes('es') ? 'selected' : ''}>${v.name}</option>`)
+            .join('');
+    }
+    synth.onvoiceschanged = populateVoices;
+    populateVoices();
+
+    // Cargar PDFs
+    document.getElementById('pdf-upload').addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files);
+        for (const file of files) {
+            const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+            let text = "";
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                text += content.items.map(s => s.str).join(" ") + " ";
+            }
+            // Limpieza profunda para evitar duplicados en el split
+            const bookFragments = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]+/g) || [text];
+            library.push({ name: file.name, fragments: bookFragments.map(f => f.trim()), lastIndex: 0 });
+        }
+        updateLibraryUI();
+    });
+
+    function updateLibraryUI() {
+        document.getElementById('book-list').innerHTML = library.map((book, i) => `
+            <div class="book-item ${i === currentBookIndex ? 'active' : ''}" onclick="loadBook(${i})">📖 ${book.name}</div>
+        `).join('');
+    }
+
+    function loadBook(index) {
+        stopAudio();
+        currentBookIndex = index;
+        const book = library[index];
+        const playlistDiv = document.getElementById('playlist');
+        playlistDiv.innerHTML = '';
+        
+        book.fragments.forEach((frag, i) => {
+            const span = document.createElement('span');
+            span.className = 'sentence';
+            span.id = `s-${i}`;
+            span.innerText = frag + " ";
+            span.onclick = () => jumpTo(i);
+            playlistDiv.appendChild(span);
+        });
+        updateLibraryUI();
+    }
+
+    // LÓGICA DE AUDIO MEJORADA
+    function speak(index) {
+        if (currentBookIndex === -1 || index >= library[currentBookIndex].fragments.length || !isPlaying) {
+            isPlaying = false;
+            return;
+        }
+
+        const book = library[currentBookIndex];
+        book.lastIndex = index;
+        
+        // Cancelar cualquier audio previo antes de una nueva frase
+        synth.cancel();
+
+        currentUtterance = new SpeechSynthesisUtterance(book.fragments[index]);
+        currentUtterance.voice = synth.getVoices()[document.getElementById('voice-select').value];
+        currentUtterance.rate = 0.9;
+
+        // Resaltado
+        document.querySelectorAll('.sentence').forEach(s => s.classList.remove('active'));
+        const el = document.getElementById(`s-${index}`);
+        if(el) {
+            el.classList.add('active');
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+
+        currentUtterance.onend = () => {
+            if(isPlaying) {
+                // Pequeño timeout para evitar recursión inmediata que causa bloqueos
+                setTimeout(() => speak(index + 1), 50);
+            }
+        };
+
+        synth.speak(currentUtterance);
+    }
+
+    function jumpTo(index) {
+        isPlaying = true;
+        speak(index);
+    }
+
+    function stopAudio() {
+        isPlaying = false;
+        synth.cancel();
+    }
+
+    document.getElementById('btn-play').addEventListener('click', () => {
+        if (currentBookIndex === -1) return;
+        if (isPlaying) {
+            stopAudio();
+            document.getElementById('btn-play').innerText = "Reanudar";
+        } else {
+            isPlaying = true;
+            speak(library[currentBookIndex].lastIndex);
+            document.getElementById('btn-play').innerText = "Pausar";
+        }
+    });
+
+    document.getElementById('btn-stop').addEventListener('click', () => {
+        stopAudio();
+        if(currentBookIndex !== -1) {
+            library[currentBookIndex].lastIndex = 0;
+            loadBook(currentBookIndex);
+        }
+    });
+
+    // Cambios de estilo
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+        document.body.classList.toggle('dark-mode');
+    });
+
+    document.getElementById('font-slider').addEventListener('input', (e) => {
+        document.getElementById('playlist').style.fontSize = e.target.value + 'px';
+    });
+
+    // MANTENIMIENTO: Solo si está realmente trabado, pero con cuidado
+    setInterval(() => {
+        if (isPlaying && !synth.speaking) {
+            // Si debería estar sonando pero no hay actividad, forzamos siguiente
+            speak(library[currentBookIndex].lastIndex);
+        }
+    }, 10000);
+</script>
+</body>
+</html>
